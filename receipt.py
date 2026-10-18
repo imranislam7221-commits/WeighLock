@@ -1,21 +1,45 @@
 import os
 import re
 import time
+import logging
 from reportlab.lib.pagesizes import A5
 from reportlab.pdfgen import canvas
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from database import get_working_directory, backup_file
 from config import COMPANY_NAME
+from logger import get_logger
+
+log = get_logger("receipt")
+
+def _find_bangla_font():
+    # Windows fonts + common Linux paths + bundled
+    candidates = [
+        r"C:\Windows\Fonts\Nirmala.ttf",
+        r"C:\Windows\Fonts\NirmalaB.ttf",
+        r"C:\Windows\Fonts\NirmalaS.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansBengali-Regular.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansBengali-Bold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        os.path.join(os.path.dirname(__file__), "fonts", "NotoSansBengali-Regular.ttf"),
+    ]
+    for p in candidates:
+        if os.path.exists(p):
+            return p
+    return None
+
 
 _BN = False
+_font_path = _find_bangla_font()
 try:
-    for _p in [r"C:\Windows\Fonts\Nirmala.ttf", r"C:\Windows\Fonts\NirmalaB.ttf"]:
-        if os.path.exists(_p):
-            pdfmetrics.registerFont(TTFont('Nirmala', _p))
-            _BN = True
-            break
-except Exception:
+    if _font_path:
+        pdfmetrics.registerFont(TTFont('Nirmala', _font_path))
+        _BN = True
+        log.info("Bangla font loaded: %s", _font_path)
+    else:
+        log.warning("No Bangla font found, using Helvetica fallback")
+except Exception as e:
+    log.warning("Bangla font load failed: %s", e)
     _BN = False
 
 F_B = 'Nirmala' if _BN else 'Helvetica-Bold'
@@ -81,7 +105,8 @@ def generate_pdf_receipt(truck_no, material, gross, tare, net,
     c.drawString(30, y, f"NET: {net} KG"); y -= 20
     try:
         amt, pd, du = float(amount or 0), float(paid or 0), float(due or 0)
-    except Exception:
+    except Exception as e:
+        log.debug("amount parse failed: %s", e)
         amt = pd = du = 0
     if amt > 0 or pd > 0 or du > 0:
         c.setFont(F_N, 11)
@@ -98,6 +123,6 @@ def generate_pdf_receipt(truck_no, material, gross, tare, net,
     c.save()
     try:
         backup_file(path)
-    except Exception:
-        pass
+    except Exception as e:
+        log.debug("backup_file failed: %s", e)
     return path

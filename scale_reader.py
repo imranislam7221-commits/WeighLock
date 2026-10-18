@@ -4,10 +4,13 @@ import random
 import re
 import os
 import json
+import logging
 
 from config import SCALE_COM_PORT, SCALE_BAUDRATE, SCALE_TIMEOUT, USE_TEST_SIMULATOR
 from database import get_local_directory
+from logger import get_logger
 
+log = get_logger("scale_reader")
 BAUDS = [9600, 4800, 2400, 1200, 19200, 38400, 57600, 115200]
 
 
@@ -67,8 +70,8 @@ def read_scale_settings():
             baud = js.get("scale_baud", baud) or baud
             if "use_simulator" in js:
                 sim = bool(js["use_simulator"])
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning("read_scale_settings failed: %s", e)
     return port, baud, sim
 
 
@@ -76,7 +79,8 @@ def list_com_ports():
     try:
         from serial.tools import list_ports
         return [p.device for p in list_ports.comports()]
-    except Exception:
+    except Exception as e:
+        log.debug("list_com_ports failed: %s", e)
         return []
 
 
@@ -129,7 +133,8 @@ class ScaleReader:
         if want_baud and str(want_baud).upper() != "AUTO":
             try:
                 bauds = [int(want_baud)]
-            except Exception:
+            except Exception as e:
+                log.debug("bad baud %s: %s", want_baud, e)
                 bauds = [9600]
         else:
             # fast: 9600 age, tarpor baki
@@ -158,7 +163,8 @@ class ScaleReader:
             med = s[len(s)//2]
             self._last = med
             return med
-        except Exception:
+        except Exception as e:
+            log.debug("_stable_filter error: %s", e)
             return val
 
     def _loop(self):
@@ -192,14 +198,15 @@ class ScaleReader:
                                     break
                             else:
                                 time.sleep(0.03)
-                        except Exception:
+                        except Exception as e:
+                            log.debug("read loop error: %s", e)
                             break
                     if found:
                         break
                     try:
                         t.close()
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        log.debug("close port error: %s", e)
                 if found:
                     break
 
@@ -250,14 +257,15 @@ class ScaleReader:
                     self._set_status(f"Read error, reconnect... {e}")
                     try:
                         ser.close()
-                    except Exception:
-                        pass
+                    except Exception as e2:
+                        log.debug("ser close error: %s", e2)
                     time.sleep(1.5)
                     ser = self._open(self.port, self.baud)
-                except Exception:
+                except Exception as e2:
+                    log.warning("reconnect failed: %s", e2)
                     time.sleep(1.5)
         try:
             if ser and ser.is_open:
                 ser.close()
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("final ser close error: %s", e)

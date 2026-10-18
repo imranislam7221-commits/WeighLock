@@ -1,6 +1,7 @@
 import time
 import customtkinter as ctk
 from tkinter import messagebox
+import logging
 from config import APP_TITLE, APP_SIZE, USE_TEST_SIMULATOR, STABLE_RANGE, STABLE_COUNT, SCALE_COM_PORT, WEIGHT_UNIT
 from database import get_db_connection, fetch_recent, today_total, find_history_from_drives, get_local_directory, get_backup_directory, backup_file, find_last_by_truck, find_by_truck_or_challan, get_next_challan, save_tare_memory, get_tare_memory
 from receipt import generate_pdf_receipt
@@ -14,6 +15,9 @@ from ui.history_table import HistoryTable
 from ui.settings_window import SettingsWindow
 import os
 import shutil
+from logger import get_logger
+
+log = get_logger("app")
 
 
 class MainApp(ctk.CTk):
@@ -33,9 +37,9 @@ class MainApp(ctk.CTk):
         try:
             _, restored, msg = find_history_from_drives()
             if restored:
-                print(msg)
-        except Exception:
-            pass
+                log.info(msg)
+        except Exception as e:
+            log.warning("history restore check failed: %s", e)
 
         self.header = Header(self)
         self.header.set_live(not USE_TEST_SIMULATOR)
@@ -96,11 +100,11 @@ class MainApp(ctk.CTk):
                 self.operator = n
                 try:
                     self.status.configure(text=f"Operator: {n} | {self.status.cget('text')}")
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.debug("status configure failed: %s", e)
             self.after(600, lambda: LoginWindow(self, _set_op))
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("login window init failed: %s", e)
         # truck / challan দিলে পুরান data auto
         self._truck_after = None
         try:
@@ -110,8 +114,8 @@ class MainApp(ctk.CTk):
             self.form.challan.bind("<KeyRelease>", self._challan_typing)
             self.form.challan.bind("<FocusOut>", lambda e: self.auto_fill_challan())
             self.form.challan.bind("<Return>", lambda e: self.auto_fill_challan())
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("bind events failed: %s", e)
 
     # thread-safe callbacks
     def _w_cb(self, v):
@@ -139,10 +143,10 @@ class MainApp(ctk.CTk):
                         self.toggle_lock()
                         try:
                             self.status.configure(text="অটো LOCK হয়েছে (setting ON)")
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
+                        except Exception as e:
+                            log.debug("status configure failed: %s", e)
+                except Exception as e:
+                    log.warning("auto_lock check failed: %s", e)
 
     def toggle_lock(self):
         if self.locked_weight is None:
@@ -163,8 +167,8 @@ class MainApp(ctk.CTk):
             messagebox.showwarning("আটকে গেছে", "ধাপ ১: আগে গাড়ি নম্বর লিখুন।\nগাড়ি নম্বর ছাড়া ১ম ওজন হবে না।")
             try:
                 self.form.truck.focus()
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug("truck focus failed: %s", e)
             return
         if self.locked_weight is None:
             messagebox.showwarning("আটকে গেছে", "ওজন LOCK না করে ১ম সেভ হবে না।\nআগে ⚖ LOCK চাপুন।")
@@ -200,7 +204,8 @@ class MainApp(ctk.CTk):
         if d.get("use_manual"):
             try:
                 tare = float(d["manual_tare"])
-            except Exception:
+            except Exception as e:
+                log.debug("manual tare parse failed: %s", e)
                 messagebox.showwarning("সতর্ক", "হাতে tare সংখ্যায় লিখুন।")
                 return
         else:
@@ -230,7 +235,8 @@ class MainApp(ctk.CTk):
         # overload alarm: capacity (default 100 ton)
         try:
             cap = float(self.settings.get("capacity_ton", 100) or 100) * 1000
-        except Exception:
+        except Exception as e:
+            log.debug("capacity_ton parse failed: %s", e)
             cap = 100000
         if gross > cap:
             if not messagebox.askyesno("OVERLOAD!", f"ওজন {gross} KG capacity {cap:.0f} KG এর বেশি!\nতবুও স্লিপ করবেন?"):
@@ -238,16 +244,19 @@ class MainApp(ctk.CTk):
         # vara auto + due/baki
         try:
             fps = float(self.settings.get("fee_per_slip", 0) or 0)
-        except Exception:
+        except Exception as e:
+            log.debug("fee_per_slip parse failed: %s", e)
             fps = 0
         try:
             fpt = float(self.settings.get("fee_per_ton", 0) or 0)
-        except Exception:
+        except Exception as e:
+            log.debug("fee_per_ton parse failed: %s", e)
             fpt = 0
         amount = fps + (net/1000.0) * fpt
         try:
             paid = float(d.get("paid", 0) or 0)
-        except Exception:
+        except Exception as e:
+            log.debug("paid parse failed: %s", e)
             paid = 0
         due = max(0, amount - paid)
         slip = str(int(time.time()))[-8:]
@@ -261,9 +270,10 @@ class MainApp(ctk.CTk):
                 try:
                     self.form.challan.delete(0, "end")
                     self.form.challan.insert(0, challan_auto)
-                except Exception:
-                    pass
-            except Exception:
+                except Exception as e:
+                    log.debug("challan insert failed: %s", e)
+            except Exception as e:
+                log.warning("get_next_challan failed: %s", e)
                 challan_auto = f"CH-{slip}"
         try:
             conn = get_db_connection()
@@ -275,13 +285,13 @@ class MainApp(ctk.CTk):
             try:
                 # khali gari = choto weight tai tare
                 save_tare_memory(d["truck"], tare)
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug("save_tare_memory failed: %s", e)
             # local DB backup to D:
             try:
                 backup_file(os.path.join(get_local_directory(), "truck_scale.db"))
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug("DB backup failed: %s", e)
             pdf = generate_pdf_receipt(d["truck"], d["material"], gross, tare, net,
                                        driver=d["driver"], supplier=d["supplier"],
                                        slip_no=slip, mobile=d["mobile"],
@@ -291,8 +301,8 @@ class MainApp(ctk.CTk):
                                        operator=getattr(self, "operator", ""))
             try:
                 backup_file(pdf)
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug("PDF backup failed: %s", e)
             self.panel.set_values(gross, tare, net)
             self.saved_gross = 0
             self.locked_weight = None
@@ -301,6 +311,7 @@ class MainApp(ctk.CTk):
             self.refresh_history()
             messagebox.showinfo("সফল", f"নিট: {net} KG\nভাড়া: {amount:.0f} জমা: {paid:.0f} বাকি: {due:.0f}\nস্লিপ: {slip}\nPDF রেডি।")
         except Exception as e:
+            log.error("save_tare_and_print failed: %s", e, exc_info=True)
             messagebox.showerror("এরর", str(e))
 
     def refresh_history(self):
@@ -309,16 +320,16 @@ class MainApp(ctk.CTk):
             self.history.set_rows(rows)
             c, kg = today_total()
             self.history.set_total(c or 0, kg or 0)
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("refresh_history failed: %s", e)
 
     def _truck_typing(self, event=None):
         try:
             if self._truck_after:
                 self.after_cancel(self._truck_after)
             self._truck_after = self.after(600, self.auto_fill_truck)
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("_truck_typing failed: %s", e)
 
     def auto_fill_truck(self):
         self._auto_fill(self.form.truck.get().strip())
@@ -328,15 +339,15 @@ class MainApp(ctk.CTk):
             if self._truck_after:
                 self.after_cancel(self._truck_after)
             self._truck_after = self.after(600, self.auto_fill_challan)
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("_challan_typing failed: %s", e)
 
     def auto_fill_challan(self):
         q = ""
         try:
             q = self.form.challan.get().strip()
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("auto_fill_challan get failed: %s", e)
         if len(q) >= 2:
             self._auto_fill(q, from_challan=True)
 
@@ -357,8 +368,8 @@ class MainApp(ctk.CTk):
                 if not self.form.challan.get().strip() and rec.get("challan"):
                     self.form.challan.delete(0, "end")
                     self.form.challan.insert(0, rec["challan"])
-            except Exception:
-                pass
+            except Exception as e:
+                log.debug("auto_fill truck/challan set failed: %s", e)
             self.form.set_data(driver=rec.get("driver", ""),
                                supplier=rec.get("supplier", ""),
                                mobile=rec.get("mobile", ""),
@@ -375,15 +386,15 @@ class MainApp(ctk.CTk):
                     self.form.manual_var.set(True)
                     try:
                         self.form._toggle_manual()
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        log.debug("toggle_manual failed: %s", e)
                     self.form.tare_manual.delete(0, "end")
                     self.form.tare_manual.insert(0, str(int(mem)))
                     self.form.set_step(f"মনে রাখা tare: {int(mem)} KG বসানো হয়েছে।")
-            except Exception:
-                pass
-        except Exception:
-            pass
+            except Exception as e:
+                log.debug("tare memory auto-fill failed: %s", e)
+        except Exception as e:
+            log.warning("_auto_fill failed: %s", e)
 
     def do_backup(self):
         try:
@@ -396,6 +407,7 @@ class MainApp(ctk.CTk):
                 shutil.copy2(src, os.path.join(b, "truck_scale.db"))
             messagebox.showinfo("ব্যাকআপ", f"ব্যাকআপ OK: {b}")
         except Exception as e:
+            log.error("do_backup failed: %s", e, exc_info=True)
             messagebox.showerror("এরর", str(e))
 
     def do_restore(self):
@@ -408,6 +420,7 @@ class MainApp(ctk.CTk):
         try:
             ReprintWindow(self)
         except Exception as e:
+            log.error("open_reprint failed: %s", e, exc_info=True)
             messagebox.showerror("এরর", str(e))
 
     def open_report(self):
@@ -417,11 +430,12 @@ class MainApp(ctk.CTk):
                 self.settings["fee_per_slip"] = fps
                 self.settings["fee_per_ton"] = fpt
                 self.save_settings()
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning("on_fee save failed: %s", e)
         try:
             ReportWindow(self, self.settings, on_fee_save=on_fee)
         except Exception as e:
+            log.error("open_report failed: %s", e, exc_info=True)
             messagebox.showerror("এরর", str(e))
 
     def ask_activation(self, msg):
@@ -450,8 +464,8 @@ class MainApp(ctk.CTk):
                 with open(p, "r") as f:
                     u = json.load(f).get("unit", WEIGHT_UNIT)
                     return u if u in ("KG", "TON_KG") else "KG"
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("load_unit failed: %s", e)
         return WEIGHT_UNIT
 
     def load_settings(self):
@@ -471,8 +485,8 @@ class MainApp(ctk.CTk):
             if os.path.exists(p):
                 with open(p, "r") as f:
                     base.update(json.load(f))
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("load_settings failed: %s", e)
         return base
 
     def open_settings(self):
@@ -486,8 +500,8 @@ class MainApp(ctk.CTk):
                 self.settings["material_list"] = mats
                 try:
                     self.form.set_material_list(mats)
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.debug("set_material_list failed: %s", e)
             self.save_settings()
             self.form.apply_settings(show_challan=self.settings.get("show_challan", True),
                                      show_product=self.settings.get("show_product", True),
@@ -501,13 +515,13 @@ class MainApp(ctk.CTk):
                         self.settings.get("use_simulator") != old_sim):
                     try:
                         self.reader.stop()
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        log.debug("reader.stop failed: %s", e)
                     self.reader = ScaleReader(on_weight=self._w_cb, on_status=self._s_cb)
                     self.reader.start()
                     self.status.configure(text="Scale restart: port/baud change")
-            except Exception:
-                pass
+            except Exception as e:
+                log.warning("reader restart failed: %s", e)
         SettingsWindow(self, self.settings, on_save)
 
     def save_settings(self):
@@ -519,10 +533,10 @@ class MainApp(ctk.CTk):
                 json.dump(self.settings, f)
             try:
                 backup_file(p)
-            except Exception:
-                pass
-        except Exception:
-            pass
+            except Exception as e:
+                log.debug("backup_file in save_settings failed: %s", e)
+        except Exception as e:
+            log.warning("save_settings failed: %s", e)
 
     def save_unit(self, unit):
         self.unit = unit
@@ -531,8 +545,8 @@ class MainApp(ctk.CTk):
                 self.settings["unit"] = unit
                 self.save_settings()
                 return
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("save_unit via settings failed: %s", e)
         import json
         try:
             p = os.path.join(get_local_directory(), "settings.json")
@@ -543,12 +557,12 @@ class MainApp(ctk.CTk):
             cur["unit"] = unit
             with open(p, "w") as f:
                 json.dump(cur, f)
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("save_unit fallback failed: %s", e)
 
     def on_close(self):
         try:
             self.reader.stop()
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("reader.stop on close failed: %s", e)
         self.destroy()

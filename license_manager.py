@@ -2,8 +2,12 @@ import hashlib
 import os
 import shutil
 import subprocess
+import logging
 from config import SECRET_SALT
 from database import get_local_directory, get_backup_directory
+from logger import get_logger
+
+log = get_logger("license")
 
 
 def get_hwid():
@@ -19,8 +23,8 @@ def get_hwid():
             if line and "serial" not in line.lower():
                 cands.append(line)
                 break
-    except Exception:
-        pass
+    except Exception as e:
+        log.debug("wmic baseboard failed: %s", e)
     try:
         out2 = subprocess.check_output(
             "wmic csproduct get uuid", shell=True,
@@ -31,8 +35,8 @@ def get_hwid():
             if line and "uuid" not in line.lower():
                 cands.append(line)
                 break
-    except Exception:
-        pass
+    except Exception as e:
+        log.debug("wmic csproduct failed: %s", e)
     serial = "|".join(cands) if cands else ""
     if not serial:
         return "FALLBACK_HWID_101"
@@ -49,8 +53,8 @@ def license_paths():
         b = get_backup_directory()
         if b:
             paths.append(os.path.join(b, "license.key"))
-    except Exception:
-        pass
+    except Exception as e:
+        log.debug("backup dir check failed: %s", e)
     return paths
 
 
@@ -68,8 +72,8 @@ def restore_license():
             if os.path.exists(p):
                 shutil.copy2(p, local)
                 return local
-        except Exception:
-            pass
+        except Exception as e:
+            log.debug("restore_license copy failed: %s", e)
     return None
 
 
@@ -84,8 +88,8 @@ def check_license():
         if _os.path.exists(_p):
             with open(_p, "r") as _f:
                 strict = bool(_js.load(_f).get("strict_license", False))
-    except Exception:
-        pass
+    except Exception as e:
+        log.debug("strict_license read failed: %s", e)
     restore_license()
     p = license_path()
     try:
@@ -97,12 +101,13 @@ def check_license():
                     for bp in license_paths()[1:]:
                         if not os.path.exists(bp):
                             shutil.copy2(p, bp)
-                except Exception:
-                    pass
+                except Exception as e:
+                    log.debug("license backup copy failed: %s", e)
                 return True
             return False
         return False if strict else True
-    except Exception:
+    except Exception as e:
+        log.warning("check_license failed: %s", e)
         return False if strict else True
 
 
@@ -115,6 +120,6 @@ def save_license(key):
             os.makedirs(os.path.dirname(bp), exist_ok=True)
             with open(bp, "w") as f:
                 f.write(key)
-    except Exception:
-        pass
+    except Exception as e:
+        log.debug("save_license backup failed: %s", e)
     return key == make_key(get_hwid())

@@ -1,6 +1,11 @@
 import os
 import shutil
 import sqlite3
+import logging
+
+from logger import get_logger
+
+log = get_logger("database")
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -25,7 +30,8 @@ def get_backup_directory():
             os.makedirs(b, exist_ok=True)
             os.makedirs(os.path.join(b, "Receipts"), exist_ok=True)
             return b
-        except Exception:
+        except Exception as e:
+            log.warning("backup dir create failed: %s", e)
             return None
     return None
 
@@ -40,8 +46,8 @@ def backup_file(local_path):
         dest = os.path.join(bdir, rel)
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         shutil.copy2(local_path, dest)
-    except Exception:
-        pass
+    except Exception as e:
+        log.debug("backup_file failed: %s", e)
 
 
 def find_history_from_drives():
@@ -56,7 +62,8 @@ def find_history_from_drives():
             c.close()
             if n > 0:
                 local_empty = False
-        except Exception:
+        except Exception as e:
+            log.warning("local db check failed: %s", e)
             pass
     if not local_empty:
         return (local_db, False, "Local e history ache")
@@ -75,10 +82,11 @@ def find_history_from_drives():
                         if os.path.isfile(s) and not os.path.exists(d):
                             try:
                                 shutil.copy2(s, d)
-                            except Exception:
-                                pass
+                            except Exception as e:
+                                log.debug("receipt restore skip %s: %s", fn, e)
                 return (cand, True, f"{drv} theke history restore hoise")
-        except Exception:
+        except Exception as e:
+            log.warning("drive %s scan failed: %s", drv, e)
             continue
     return (None, False, "Kothao backup pai nai")
 
@@ -112,8 +120,8 @@ def get_db_connection():
         if cur.fetchone()[0] == 0:
             conn.execute("INSERT INTO operators (name, pin) VALUES (?, ?)", ("admin", "1234"))
             conn.commit()
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning("operator init failed: %s", e)
     try:
         cols = [r[1] for r in conn.execute("PRAGMA table_info(records)").fetchall()]
         for c in ["driver", "supplier", "mobile", "slip_no", "challan_no", "product", "owner", "address"]:
@@ -124,8 +132,8 @@ def get_db_connection():
                 conn.execute(f"ALTER TABLE records ADD COLUMN {c} REAL DEFAULT 0")
         if "operator" not in cols:
             conn.execute("ALTER TABLE records ADD COLUMN operator TEXT DEFAULT ''")
-    except Exception:
-        pass
+    except Exception as e:
+        log.warning("schema migration failed: %s", e)
     conn.execute('CREATE INDEX IF NOT EXISTS idx_time ON records(time_stamp)')
     conn.execute('CREATE INDEX IF NOT EXISTS idx_truck ON records(truck_no)')
     return conn
