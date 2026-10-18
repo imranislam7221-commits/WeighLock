@@ -1,0 +1,8 @@
+SPOT SETUP - Weigh Lock (seller checklist)
+1. Scale er USB/RS cable PC te lagan, driver install ache kina Device Manager > Ports e dekhen (COMx).
+2. App > Setting: scale_port=AUTO (na pele COMx hate likhen), scale_baud=AUTO (na pele 9600).
+3. Setting: use_simulator OFF (spot e), strict_license ON (sell final e).
+4. Customer er HWID (status bar) nen > seller_keygen.py diye key > Activation e key din. license.key D: teo backup jabe.
+5. Ekta test slip koren (vora+khali), PDF + D:\TruckScale_SafeBackup e backup check.
+6. Vara setting: Report > fee per slip/ton set.
+7. Windows dile D: theke Restore button e history + license fire asbe.

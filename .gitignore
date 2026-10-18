@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+build/
+dist/
+*.spec
+data/truck_scale.db
+data/Receipts/
+*.log
+*.tmp
+.vscode/
+.idea/
+*.env
