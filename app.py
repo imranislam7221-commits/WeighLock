@@ -471,23 +471,48 @@ class MainApp(ctk.CTk):
     def load_settings(self):
         import json
         from ui.entry_form import DEFAULT_MATS
+        from config import SETTINGS_VERSION, STRICT_LICENSE_DEFAULT, USE_SIMULATOR_DEFAULT
         base = {"unit": self.unit if hasattr(self, "unit") else WEIGHT_UNIT,
                 "show_challan": True, "show_product": True,
                 "show_owner": True, "show_address": True,
                 "allow_manual": True, "require_truck": True,
-                "auto_lock": False, "use_simulator": True,
-                "strict_license": False, "fee_per_slip": 0, "fee_per_ton": 0,
+                "auto_lock": False, "use_simulator": USE_SIMULATOR_DEFAULT,
+                "strict_license": STRICT_LICENSE_DEFAULT, "fee_per_slip": 0, "fee_per_ton": 0,
                 "capacity_ton": 100,
                 "scale_port": "AUTO", "scale_baud": "AUTO",
-                "material_list": DEFAULT_MATS[:]}
+                "material_list": DEFAULT_MATS[:],
+                "settings_version": SETTINGS_VERSION}
         try:
             p = os.path.join(get_local_directory(), "settings.json")
             if os.path.exists(p):
                 with open(p, "r") as f:
-                    base.update(json.load(f))
+                    saved = json.load(f)
+                # Migration
+                saved = self._migrate_settings(saved, SETTINGS_VERSION)
+                base.update(saved)
         except Exception as e:
             log.warning("load_settings failed: %s", e)
         return base
+
+    def _migrate_settings(self, saved, target_version):
+        """Migrate old settings to current version."""
+        try:
+            from config import STRICT_LICENSE_DEFAULT, USE_SIMULATOR_DEFAULT
+            current = saved.get("settings_version", 1)
+            if current >= target_version:
+                return saved
+            # v1 -> v2: add new keys with defaults
+            if current == 1:
+                saved.setdefault("capacity_ton", 100)
+                saved.setdefault("material_list", ["পাথর", "ধান", "বালু", "সিমেন্ট", "রড", "কয়লা", "অন্যান্য / Others"])
+                saved.setdefault("auto_lock", False)
+                saved.setdefault("use_simulator", USE_SIMULATOR_DEFAULT)
+                saved.setdefault("strict_license", STRICT_LICENSE_DEFAULT)
+            saved["settings_version"] = target_version
+            log.info("Settings migrated from v%s to v%s", current, target_version)
+        except Exception as e:
+            log.warning("settings migration failed: %s", e)
+        return saved
 
     def open_settings(self):
         def on_save(out):
@@ -526,8 +551,10 @@ class MainApp(ctk.CTk):
 
     def save_settings(self):
         import json
+        from config import SETTINGS_VERSION
         try:
             self.settings["unit"] = getattr(self, "unit", WEIGHT_UNIT)
+            self.settings["settings_version"] = SETTINGS_VERSION
             p = os.path.join(get_local_directory(), "settings.json")
             with open(p, "w") as f:
                 json.dump(self.settings, f)

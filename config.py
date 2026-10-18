@@ -12,7 +12,7 @@ COMPANY_NAME = "Weigh Lock"
 COMPANY_TAG = "Digital Weighbridge - Lifetime"
 
 # Test er jonno True, customer scale e False kore debo
-USE_TEST_SIMULATOR = True
+USE_TEST_SIMULATOR = False
 
 # Stable weight lock setting
 STABLE_RANGE = 20
@@ -20,3 +20,10 @@ STABLE_COUNT = 5
 
 # Default KG, chaile TON_KG. Install default KG thakbe.
 WEIGHT_UNIT = "KG"
+
+# Settings schema version for migration
+SETTINGS_VERSION = 2
+
+# Customer build defaults: strict license, no simulator
+STRICT_LICENSE_DEFAULT = True
+USE_SIMULATOR_DEFAULT = False

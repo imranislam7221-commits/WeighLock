@@ -90,7 +90,7 @@ class ScaleReader:
     Pure HID scale hole driver + hidapi lagbe (code ready, optional)."""
 
     def __init__(self, on_weight=None, on_status=None, on_raw=None):
-        self.current_weight = 0
+        self._current_weight = 0
         self.connected = False
         self.is_sim = False
         self.port = None
@@ -101,6 +101,9 @@ class ScaleReader:
         self.on_raw = on_raw
         self.thread = None
         self._sim_base = 12250
+        self._lock = threading.Lock()
+        self._fbuf = []
+        self._last = None
 
     def start(self):
         self.stop_flag = False
@@ -115,6 +118,25 @@ class ScaleReader:
     def _set_status(self, msg):
         if self.on_status:
             self.on_status(msg)
+
+    @property
+    def current_weight(self):
+        with self._lock:
+            return self._current_weight
+
+    @current_weight.setter
+    def current_weight(self, value):
+        with self._lock:
+            self._current_weight = value
+
+    def get_connection_info(self):
+        with self._lock:
+            return {
+                'connected': self.connected,
+                'is_sim': self.is_sim,
+                'port': self.port,
+                'baud': self.baud,
+            }
 
     def _open(self, port, baud):
         import serial
@@ -145,24 +167,22 @@ class ScaleReader:
         # hijibiji spike bad: hothat +-1000 jump 1 bar asle ignore,
         # 2 bar same range e asle accept. median of last 3.
         try:
-            if not hasattr(self, "_fbuf"):
-                self._fbuf = []
-                self._last = None
-            if self._last is not None and abs(val - self._last) > 1000:
-                # spike check: buf e same spike ache?
-                same = [x for x in self._fbuf if abs(x - val) <= 100]
-                if len(same) < 1:
-                    self._fbuf.append(val)
-                    if len(self._fbuf) > 3:
-                        self._fbuf.pop(0)
-                    return None
-            self._fbuf.append(val)
-            if len(self._fbuf) > 3:
-                self._fbuf.pop(0)
-            s = sorted(self._fbuf)
-            med = s[len(s)//2]
-            self._last = med
-            return med
+            with self._lock:
+                if self._last is not None and abs(val - self._last) > 1000:
+                    # spike check: buf e same spike ache?
+                    same = [x for x in self._fbuf if abs(x - val) <= 100]
+                    if len(same) < 1:
+                        self._fbuf.append(val)
+                        if len(self._fbuf) > 3:
+                            self._fbuf.pop(0)
+                        return None
+                self._fbuf.append(val)
+                if len(self._fbuf) > 3:
+                    self._fbuf.pop(0)
+                s = sorted(self._fbuf)
+                med = s[len(s)//2]
+                self._last = med
+                return med
         except Exception as e:
             log.debug("_stable_filter error: %s", e)
             return val
@@ -212,26 +232,34 @@ class ScaleReader:
 
         if found:
             pt, bd, ser = found
-            self.port, self.baud = pt, bd
-            self.connected = True
-            self.is_sim = False
+            with self._lock:
+                self.port, self.baud = pt, bd
+                self.connected = True
+                self.is_sim = False
             self._set_status(f"Scale connected: {pt} @ {bd} (RS/USB auto)")
         else:
             if use_sim:
-                self.connected = True
-                self.is_sim = True
+                with self._lock:
+                    self.connected = True
+                    self.is_sim = True
                 n = len(list_com_ports())
                 self._set_status(f"TEST MODE - Simulator ON (COM pai nai, scan {n} port)")
             else:
-                self.connected = False
+                with self._lock:
+                    self.connected = False
                 self._set_status(f"Scale pai nai (scan {len(ports)} port). USB/RS cable + driver check korun.")
                 return
 
         while not self.stop_flag:
-            if self.is_sim:
+            with self._lock:
+                is_sim = self.is_sim
+                port = self.port
+                baud = self.baud
+            if is_sim:
                 self._sim_base += random.randint(-8, 8)
                 self._sim_base = max(1000, min(100000, self._sim_base))
-                self.current_weight = self._sim_base
+                with self._lock:
+                    self.current_weight = self._sim_base
                 if self.on_weight:
                     self.on_weight(self.current_weight)
                 time.sleep(0.5)
@@ -245,7 +273,8 @@ class ScaleReader:
                             fval = self._stable_filter(val)
                             if fval is None:
                                 continue
-                            self.current_weight = fval
+                            with self._lock:
+                                self.current_weight = fval
                             if self.on_weight:
                                 self.on_weight(self.current_weight)
                             break
@@ -260,7 +289,7 @@ class ScaleReader:
                     except Exception as e2:
                         log.debug("ser close error: %s", e2)
                     time.sleep(1.5)
-                    ser = self._open(self.port, self.baud)
+                    ser = self._open(port, baud)
                 except Exception as e2:
                     log.warning("reconnect failed: %s", e2)
                     time.sleep(1.5)

@@ -3,7 +3,9 @@ import os
 here = os.path.dirname(os.path.abspath(__file__))
 m.run([os.path.join(here, "main.py"), "--name", "WeighLock", "--onefile",
        "--windowed", "--noconfirm", "--clean",
+       "--icon", os.path.join(here, "icon.ico"),
        "--add-data", f"{os.path.join(here, 'ui')}{os.pathsep}ui",
+       "--add-data", f"{os.path.join(here, 'icon.ico')}{os.pathsep}.",
        "--hidden-import", "customtkinter",
        "--collect-all", "customtkinter"])
 print("BUILD DONE: dist/WeighLock.exe")
